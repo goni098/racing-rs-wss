@@ -1,3 +1,4 @@
+mod database;
 mod error;
 mod extractors;
 mod handlers;

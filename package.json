@@ -4,12 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "seagen": "sea generate entity -o _generated_ --with-serde both",
+    "prisma": "prisma"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "prisma": "^5.17.0",
     "ws": "^8.18.0"
   }
 }
