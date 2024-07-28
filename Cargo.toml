@@ -1,0 +1,37 @@
+[package]
+name = "axum-sv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7.5", features = ["ws"] }
+serde = { version = "1.0.204", features = ["derive"] }
+tokio = { version = "1.39.2", features = ["rt-multi-thread"] }
+serde_json = "1.0.120"
+chrono = "0.4.38"
+dotenv = "0.15.0"
+axum-extra = { version = "0.9.3", features = ["typed-header"] }
+validator = { version = "0.18.1", features = ["derive"] }
+thiserror = "1.0.63"
+utoipa-swagger-ui = { version = "7.1.0", features = ["axum"] }
+utoipa = { version = "4.2.3", features = ["axum_extras"] }
+futures = "0.3.30"
+serde_with = "3.9.0"
+http-body-util = "0.1.2"
+axum-typed-websockets = "0.6.0"
+axum-derive-error = "0.1.0"
+tracing = "0.1.40"
+tracing-subscriber = { version = "*", features = ["env-filter"] }
+hmac = "0.12.1"
+sha2 = "0.10.8"
+hex = "0.4.3"
+url = "2.5.2"
+
+[dependencies.sea-orm]
+version = "*"
+features = [
+    "sqlx-postgres",
+    "runtime-tokio-native-tls",
+    "macros",
+    "with-chrono",
+]

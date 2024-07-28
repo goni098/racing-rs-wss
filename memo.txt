@@ -1,0 +1,1 @@
+How to implement Serialize for ServerMsg enum. I need if it is Response serialize its as string inside , if it is GuessingResult serialize its as struct inside 
