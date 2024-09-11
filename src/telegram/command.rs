@@ -17,20 +17,20 @@ use url::Url;
     rename_rule = "lowercase",
     description = "These commands are supported:"
 )]
-pub enum Command {
-    #[command(description = "display this text.")]
+pub enum RacerCommand {
+    #[command(description = "type /start to launch mini app.")]
     Help,
     #[command(description = "launch mini app.")]
     Start,
 }
 
-pub async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
+pub async fn answer(bot: Bot, msg: Message, cmd: RacerCommand) -> ResponseResult<()> {
     match cmd {
-        Command::Help => {
-            bot.send_message(msg.chat.id, Command::descriptions().to_string())
+        RacerCommand::Help => {
+            bot.send_message(msg.chat.id, RacerCommand::descriptions().to_string())
                 .await?;
         }
-        Command::Start => {
+        RacerCommand::Start => {
             let username = msg
                 .from
                 .map(|user| user.username.clone().unwrap_or(user.full_name()))

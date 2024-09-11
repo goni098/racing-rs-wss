@@ -11,6 +11,7 @@ use deadpool_redis::redis::AsyncCommands;
 use futures::{SinkExt, StreamExt};
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use tokio::time::sleep;
@@ -37,11 +38,11 @@ async fn ping_pong_socket(
     params: Params,
 ) {
     let (sender, mut receiver) = connection.split();
+
     let sender = Arc::new(RwLock::new(sender));
-
     let params = Arc::new(RwLock::new(params));
-    let params_ = params.clone();
 
+    let params_ = params.clone();
     let sender_ = sender.clone();
 
     let gas_timing = tokio::spawn(async move {
@@ -63,9 +64,11 @@ async fn ping_pong_socket(
         }
     });
 
-    tokio::spawn(async move {
-        let mut winning_streak = 0;
+    let winning_streak = Arc::new(AtomicU8::new(0));
 
+    let winning_streak_ = winning_streak.clone();
+
+    tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Item(msg) => match msg {
@@ -76,10 +79,11 @@ async fn ping_pong_socket(
                             params.gas -= 1;
 
                             let result = if let ClientMsg::Lose = msg {
-                                winning_streak = 0;
+                                winning_streak.store(0, Ordering::Release);
                                 0
                             } else {
-                                winning_streak += 1;
+                                reset_streak.abort();
+                                winning_streak.fetch_add(1, Ordering::Release);
                                 1
                             };
 
@@ -88,7 +92,7 @@ async fn ping_pong_socket(
                             let _ = sender
                                 .send(Message::Item(ServerMsg::GuessingResult(GuessingResult {
                                     result,
-                                    winning_streak,
+                                    winning_streak: winning_streak.load(Ordering::Acquire),
                                 })))
                                 .await;
                         }
