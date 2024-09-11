@@ -3,38 +3,27 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model MiniAppUser {
-  telegramId     Decimal    @id @map("telegram_id") @db.Decimal(60, 0)
-  isPremium      Boolean    @map("is_premium")
-  username       String?    @db.VarChar
-  photoUrl       String?    @map("photo_url") @db.VarChar
-  refCode        String     @unique @map("ref_code") @db.VarChar
-  refBy          String?    @map("ref_by") @db.VarChar
-  fuelTankLv     Int        @default(0) @map("fuel_tank_lv")
-  turboChangerLv Int        @default(0) @map("turbo_changer_lv")
-  activites      Activity[]
-
-  @@map("mini_app_user")
+model user {
+  telegram_id      Decimal    @id @db.Decimal(60, 0)
+  is_premium       Boolean
+  username         String?    @db.VarChar
+  photoUrl         String?    @db.VarChar
+  ref_code         String     @unique @db.VarChar
+  ref_by           String?    @db.VarChar
+  fuel_tank_lv     Int        @default(0)
+  turbo_changer_lv Int        @default(0)
+  activites        activity[]
 }
 
-model Activity {
-  id         Int         @id @default(autoincrement())
-  points     Float
-  activity   String      @db.VarChar(26)
-  date       DateTime    @default(now()) @db.Timestamptz(3)
-  telegramId Decimal     @map("telegram_id") @db.Decimal(60, 0)
-  user       MiniAppUser @relation(fields: [telegramId], references: [telegramId])
-  friendId   Decimal?    @map("friend_id") @db.Decimal(60, 0) // case activity = invite_friend
-  rootId     Int?        @unique @map("root_id")
-  ref        Activity?   @relation("activity_self_relation")
-  root       Activity?   @relation("activity_self_relation", fields: [rootId], references: [id])
+model activity {
+  id          Int      @id @default(autoincrement())
+  points      Float
+  activity    String   @db.VarChar(26)
+  date        DateTime @default(now()) @db.Timestamptz(3)
+  telegram_id Decimal  @db.Decimal(60, 0)
+  user        user     @relation(fields: [telegram_id], references: [telegram_id])
+  friend_id   Decimal? @db.Decimal(60, 0) // case activity = invite_friend
+  root_id     Int?     @unique
 
-  @@unique([telegramId, friendId])
-  @@map("activity")
-}
-
-model RefillingSnapshot {
-  id         Int      @id @default(autoincrement())
-  telegramId Decimal  @map("telegram_id") @db.Decimal(60, 0)
-  date       DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([telegram_id, friend_id])
 }

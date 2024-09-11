@@ -2,7 +2,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "mini_app_user")]
+#[sea_orm(table_name = "user")]
 pub struct Model {
     #[sea_orm(
         primary_key,
@@ -12,7 +12,9 @@ pub struct Model {
     pub telegram_id: Decimal,
     pub is_premium: bool,
     pub username: Option<String>,
+    #[sea_orm(column_name = "photoUrl")]
     pub photo_url: Option<String>,
+    #[sea_orm(unique)]
     pub ref_code: String,
     pub ref_by: Option<String>,
     pub fuel_tank_lv: i32,

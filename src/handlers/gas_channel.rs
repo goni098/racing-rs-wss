@@ -1,96 +1,80 @@
-use crate::{
-    extractors::{
-        security::WsAuth,
-        state::{Params, WsState},
-    },
-    shared::handle_gas_timing,
+use crate::database::repositories::user;
+use crate::error::Error;
+use crate::extractors::{
+    security::Auth,
+    state::{AppState, RedisConnection},
 };
-use axum::{extract::State, response::IntoResponse};
+use axum::extract::State;
 use axum_typed_websockets::{Message, WebSocket, WebSocketUpgrade};
+use chrono::Utc;
+use deadpool_redis::redis::AsyncCommands;
 use futures::{SinkExt, StreamExt};
+use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
-use tokio::{sync::RwLock, time::sleep};
+use tokio::sync::RwLock;
+use tokio::time::sleep;
 
 pub async fn gas_channel(
-    State(state): State<WsState>,
-    WsAuth(user): WsAuth,
+    Auth(user): Auth,
+    State(state): State<AppState>,
     ws: WebSocketUpgrade<ServerMsg, ClientMsg>,
-) -> impl IntoResponse {
-    let user_params = UserParams {
-        base_points: 10,
-        max_gas: 10,
-        telegram_id: user.id,
-    };
+) -> Result<(), Error> {
+    let db = state.db;
+    let mut redis_conn = state.redis_pool.get().await?;
 
-    ws.on_upgrade(|connection| ping_pong_socket(connection, state, user_params))
+    let params = Params::init(&mut redis_conn, &db, user.id).await?;
+
+    ws.on_upgrade(|connection| ping_pong_socket(connection, db, redis_conn, params));
+
+    Ok(())
 }
 
 async fn ping_pong_socket(
     connection: WebSocket<ServerMsg, ClientMsg>,
-    state: WsState,
-    user_params: UserParams,
+    db: DatabaseConnection,
+    redis_conn: RedisConnection,
+    params: Params,
 ) {
-    let (mut sender, mut receiver) = connection.split();
+    let (sender, mut receiver) = connection.split();
+    let sender = Arc::new(RwLock::new(sender));
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Signal>(100);
+    let params = Arc::new(RwLock::new(params));
+    let params_ = params.clone();
 
-    let params = {
-        let mut state = state.write().await;
+    let sender_ = sender.clone();
 
-        let params = if let Some(params) = state.get_mut(&user_params.telegram_id) {
-            params
-        } else {
-            state.insert(user_params.telegram_id, Params::defualt(10, 10));
-
-            state.get_mut(&user_params.telegram_id).unwrap()
-        };
-
-        params.active = true;
-        params.base_points = user_params.base_points;
-        params.max_gas = user_params.max_gas;
-
-        Arc::new(RwLock::new(params.clone()))
-    };
-
-    let params_channel = params.clone();
-    let tx_channel = tx.clone();
-    let channel = tokio::spawn(async move {
+    let gas_timing = tokio::spawn(async move {
         loop {
             sleep(Duration::from_millis(1000)).await;
 
-            let mut params = params_channel.write().await;
+            let mut params = params_.write().await;
 
             handle_gas_timing(&mut params);
 
-            let _ = tx_channel
-                .send(Signal::GasStaus(GasStatus {
+            let mut sender = sender_.write().await;
+
+            let _ = sender
+                .send(Message::Item(ServerMsg::GasStatus(GasStatus {
                     gas: params.gas,
                     refilling_in: params.refilling_in,
-                }))
+                })))
                 .await;
         }
     });
 
-    let mut winning_streak = 0;
-    let params_channel = params.clone();
     tokio::spawn(async move {
+        let mut winning_streak = 0;
+
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Item(msg) => match msg {
                     ClientMsg::Lose | ClientMsg::Win => {
-                        let gas = {
-                            let mut params = params.write().await;
+                        let mut params = params.write().await;
 
-                            if params.gas < 1 {
-                                0
-                            } else {
-                                params.gas -= 1;
-                                params.gas
-                            }
-                        };
+                        if params.gas > 0 {
+                            params.gas -= 1;
 
-                        if gas > 0 {
                             let result = if let ClientMsg::Lose = msg {
                                 winning_streak = 0;
                                 0
@@ -99,55 +83,23 @@ async fn ping_pong_socket(
                                 1
                             };
 
-                            let _ = tx
-                                .send(Signal::GuessingResult(GuessingResult {
+                            let mut sender = sender.write().await;
+
+                            let _ = sender
+                                .send(Message::Item(ServerMsg::GuessingResult(GuessingResult {
                                     result,
                                     winning_streak,
-                                }))
+                                })))
                                 .await;
                         }
                     }
-                    ClientMsg::Reload => {
-                        let _ = tx.send(Signal::Text("reloaded")).await;
-                    }
-                    ClientMsg::Refill => {
-                        let _ = tx.send(Signal::Text("refilled")).await;
-                    }
+                    ClientMsg::Reload => {}
+                    ClientMsg::Refill => {}
                 },
                 Message::Close(_) => {
-                    let _ = tx.send(Signal::CloseConnection).await;
-                    channel.abort();
+                    gas_timing.abort();
                 }
                 _ => {}
-            }
-        }
-    });
-
-    tokio::spawn(async move {
-        while let Some(signal) = rx.recv().await {
-            match signal {
-                Signal::GasStaus(GasStatus { gas, refilling_in }) => {
-                    let _ = sender
-                        .send(Message::Item(ServerMsg::GasStatus(GasStatus {
-                            gas,
-                            refilling_in,
-                        })))
-                        .await;
-                }
-                Signal::GuessingResult(result) => {
-                    let _ = sender
-                        .send(Message::Item(ServerMsg::GuessingResult(result)))
-                        .await;
-                }
-                Signal::CloseConnection => {
-                    let mut state = state.write().await;
-                    let mut params = params_channel.read().await.clone();
-                    params.active = false;
-                    state.insert(user_params.telegram_id, params);
-                }
-                Signal::Text(msg) => {
-                    let _ = sender.send(Message::Item(ServerMsg::Text(msg))).await;
-                }
             }
         }
     });
@@ -181,15 +133,71 @@ pub enum ServerMsg {
     GasStatus(GasStatus),
 }
 
-struct UserParams {
-    telegram_id: u64,
+#[derive(Debug, Clone)]
+struct Params {
+    gas: u8,
+    refilling_in: u8,
     max_gas: u8,
     base_points: u8,
 }
 
-enum Signal {
-    GasStaus(GasStatus),
-    GuessingResult(GuessingResult),
-    CloseConnection,
-    Text(&'static str),
+impl Params {
+    async fn init(
+        redis_conn: &mut RedisConnection,
+        db: &DatabaseConnection,
+        telegram_id: u64,
+    ) -> Result<Self, Error> {
+        let now = Utc::now().timestamp() as u64;
+
+        let last_active_time = redis_conn
+            .get::<String, Option<u64>>(format!("{}_lastime_active", telegram_id))
+            .await?
+            .unwrap_or(now);
+
+        let last_gas = redis_conn
+            .get::<String, Option<u8>>(format!("{}_lastime_active", telegram_id))
+            .await?
+            .unwrap_or(10);
+
+        let user = user::find_by_telegram_id(db, telegram_id)
+            .await?
+            .ok_or(Error::Custom("user not found".to_string()))?;
+
+        let duration = now - last_active_time;
+
+        let gas = last_gas + (duration / 90) as u8;
+        let refilling_in = (duration % 90) as u8;
+
+        Ok(Self {
+            gas,
+            refilling_in,
+            max_gas: calculate_max_gas(user.fuel_tank_lv as u8),
+            base_points: calculate_base_points(user.turbo_changer_lv as u8),
+        })
+    }
+}
+
+fn handle_gas_timing(params: &mut Params) {
+    if params.gas == params.max_gas {
+        params.refilling_in = 0;
+    } else if params.refilling_in == 0 {
+        params.refilling_in = 90;
+    } else {
+        params.refilling_in -= 1;
+        if params.refilling_in == 0 {
+            params.gas += 1
+        };
+    }
+}
+
+fn calculate_max_gas(fuel_tank_lv: u8) -> u8 {
+    10 + fuel_tank_lv * 2
+}
+
+fn calculate_base_points(turbo_changer_lv: u8) -> u8 {
+    10 + turbo_changer_lv * 10
+}
+
+fn points_by_streak(points: u16, streak: u8) -> u16 {
+    points * 2_u16.pow(streak as u32 - 1)
 }

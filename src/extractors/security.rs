@@ -23,10 +23,10 @@ fn is_premium_default() -> bool {
     false
 }
 
-pub struct WsAuth(pub MiniappUser);
+pub struct Auth(pub MiniappUser);
 
 #[async_trait]
-impl<S> FromRequestParts<S> for WsAuth
+impl<S> FromRequestParts<S> for Auth
 where
     S: Send + Sync,
 {
